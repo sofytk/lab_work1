@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="ETL_Process" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.46.1">
+  <process id="etl_process" name="ETL Process" isExecutable="true">
+    <startEvent id="StartEvent" name="Начало ETL">
+      <outgoing>Flow_0kjxopr</outgoing>
+    </startEvent>
+    <parallelGateway id="Gateway_0o6xvbf">
+      <incoming>Flow_0kjxopr</incoming>
+      <outgoing>Flow_0m9haim</outgoing>
+      <outgoing>Flow_0slavus</outgoing>
+    </parallelGateway>
+    <serviceTask id="ExtractProjectDB" name="Берём данные из project_db">
+      <incoming>Flow_0slavus</incoming>
+      <outgoing>Flow_0g80l8h</outgoing>
+    </serviceTask>
+    <serviceTask id="ExtractResumeDB" name="Берём данные из resume_db">
+      <incoming>Flow_0m9haim</incoming>
+      <outgoing>Flow_ExtractResume_To_Normalize</outgoing>
+    </serviceTask>
+    <parallelGateway id="Gateway_0ga1x5j">
+      <incoming>Flow_0g80l8h</incoming>
+      <incoming>Flow_ExtractResume_To_Normalize</incoming>
+      <outgoing>Flow_0yg4mso</outgoing>
+    </parallelGateway>
+    <serviceTask id="NormalizeNames" name="Нормализуем имена">
+      <incoming>Flow_0yg4mso</incoming>
+      <outgoing>Flow_Normalize_To_Match</outgoing>
+    </serviceTask>
+    <serviceTask id="MatchAndMerge" name="Сопоставляем имена">
+      <incoming>Flow_Normalize_To_Match</incoming>
+      <outgoing>Flow_Match_To_Aggregate</outgoing>
+    </serviceTask>
+    <serviceTask id="AggregateSkills" name="Проверяем матчинги по возрасту">
+      <incoming>Flow_Match_To_Aggregate</incoming>
+      <outgoing>Flow_07sxaji</outgoing>
+    </serviceTask>
+    <serviceTask id="ClearWarehouse" name="Очищаем data_warehouse">
+      <incoming>Flow_07sxaji</incoming>
+      <outgoing>Flow_Clear_To_LoadDim</outgoing>
+    </serviceTask>
+    <serviceTask id="LoadDimProject" name="Загружаем данные в data_warehouse">
+      <incoming>Flow_Clear_To_LoadDim</incoming>
+      <outgoing>Flow_LoadDim_To_LoadPerson</outgoing>
+    </serviceTask>
+    <endEvent id="EndSuccess" name="Success">
+      <incoming>Flow_LoadDim_To_LoadPerson</incoming>
+    </endEvent>
+    <sequenceFlow id="Flow_0kjxopr" sourceRef="StartEvent" targetRef="Gateway_0o6xvbf" />
+    <sequenceFlow id="Flow_0m9haim" sourceRef="Gateway_0o6xvbf" targetRef="ExtractResumeDB" />
+    <sequenceFlow id="Flow_0slavus" sourceRef="Gateway_0o6xvbf" targetRef="ExtractProjectDB" />
+    <sequenceFlow id="Flow_0g80l8h" sourceRef="ExtractProjectDB" targetRef="Gateway_0ga1x5j" />
+    <sequenceFlow id="Flow_ExtractResume_To_Normalize" sourceRef="ExtractResumeDB" targetRef="Gateway_0ga1x5j" />
+    <sequenceFlow id="Flow_0yg4mso" sourceRef="Gateway_0ga1x5j" targetRef="NormalizeNames" />
+    <sequenceFlow id="Flow_Normalize_To_Match" sourceRef="NormalizeNames" targetRef="MatchAndMerge" />
+    <sequenceFlow id="Flow_Match_To_Aggregate" sourceRef="MatchAndMerge" targetRef="AggregateSkills" />
+    <sequenceFlow id="Flow_07sxaji" sourceRef="AggregateSkills" targetRef="ClearWarehouse" />
+    <sequenceFlow id="Flow_Clear_To_LoadDim" sourceRef="ClearWarehouse" targetRef="LoadDimProject" />
+    <sequenceFlow id="Flow_LoadDim_To_LoadPerson" sourceRef="LoadDimProject" targetRef="EndSuccess" />
+    <textAnnotation id="TextAnnotation_08ox2ye">
+      <text>Нормализация имени (NameNormalizationService)
+1. Очистка строки:
+- Приведение к нижнему регистру
+- Замена буквы ё на е 
+- Удаление лишних пробелов и прочих знаков
+2. Разбиение строки на части (массив слов)
+3. Определение типа каждого слова:
+- Инициал: одна буква или буква с точкой (А, А.)
+- Отчество: окончания -ович, -евич, -овна, -евна, -ич
+- Фамилия: окончания -ов, -ев, -ин, -ын, -ский, -цкий, -ова, -ева, -ина, -ына, -ская, -цкая
+- Имя: входит в список известных имён или алиасов
+4. Определение порядка слов:
+- NAME_FIRST: первое слово - имя, второе - фамилия
+- SURNAME_FIRST: первое слово - фамилия, второе - имя
+5. Нормализация уменьшительных имён через словарь алиасов
+6. Формирование результата NormalizedName:
+- surname (фамилия)
+- name (нормализованное имя)
+- patronymic (отчество)
+- nameInitial (инициал имени)
+- patronymicInitial (инициал отчества)</text>
+    </textAnnotation>
+    <association id="Association_16lc0ag" associationDirection="None" sourceRef="NormalizeNames" targetRef="TextAnnotation_08ox2ye" />
+    <textAnnotation id="TextAnnotation_05udqom">
+      <text>Сравнение ФИО с помощью сходства Джаро-Винклера
+1. Весовые коэффициенты:
+- Фамилия: 65%
+- Имя: 25%
+- Отчество: 10%
+2. Сравнение фамилий
+3. Сравнение имён:
+- Оба полные имена по Джаро-Винклера
+- Полное имя и инициал: проверка первой буквы (даёт 0.95)
+- Оба инициала: сравнение символов (даёт 1.0 или 0)
+4. Сравнение отчеств: аналогично именам
+- Если отчество отсутствует у обоих: 0.5
+5. Итоговая формула:  
+totalScore = фамилия * 0.65 + имя * 0.25 + отчество * 0.10
+6. Порог принятия: totalScore &gt;= 0.85 -&gt; предположительно один человек</text>
+    </textAnnotation>
+    <association id="Association_1nma6xi" associationDirection="None" sourceRef="MatchAndMerge" targetRef="TextAnnotation_05udqom" />
+    <textAnnotation id="TextAnnotation_0jsjlwm">
+      <text>Матчинг в TransformService
+1. Для каждого человека из project_db:
+- Нормализуем имя
+- Сравниваем со всеми из resume_db
+- Вычисляем три компонента:  
+    nameSimilarity - cходство фио
+    ageMatch = |возраст1 - возраст2| &lt;= 3 года -&gt; 0.3, иначе 0  
+
+2. Итоговая оценка кандидата:  
+totalScore = nameSimilarity + ageMatch
+3 Выбор лучшего кандидата: максимальный totalScore
+4. Принятие решения:  
+totalScore &gt;= 0.5 -&gt; Успех 
+totalScore &lt; 0.5 -&gt; Отклонение</text>
+    </textAnnotation>
+    <association id="Association_0f4kd2c" associationDirection="None" sourceRef="AggregateSkills" targetRef="TextAnnotation_0jsjlwm" />
+  </process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="etl_process">
+      <bpmndi:BPMNShape id="Shape_StartEvent" bpmnElement="StartEvent">
+        <dc:Bounds x="162" y="440" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="149" y="476" width="62" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_0o6xvbf_di" bpmnElement="Gateway_0o6xvbf">
+        <dc:Bounds x="245" y="433" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ExtractProjectDB" bpmnElement="ExtractProjectDB">
+        <dc:Bounds x="330" y="360" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ExtractResumeDB" bpmnElement="ExtractResumeDB">
+        <dc:Bounds x="330" y="480" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_1mhvnbh_di" bpmnElement="Gateway_0ga1x5j">
+        <dc:Bounds x="455" y="435" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_NormalizeNames" bpmnElement="NormalizeNames">
+        <dc:Bounds x="560" y="420" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_MatchAndMerge" bpmnElement="MatchAndMerge">
+        <dc:Bounds x="730" y="420" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_AggregateSkills" bpmnElement="AggregateSkills">
+        <dc:Bounds x="880" y="420" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ClearWarehouse" bpmnElement="ClearWarehouse">
+        <dc:Bounds x="1050" y="420" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_LoadDimProject" bpmnElement="LoadDimProject">
+        <dc:Bounds x="1220" y="420" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndSuccess" bpmnElement="EndSuccess">
+        <dc:Bounds x="1372" y="442" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1369" y="478" width="42" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Association_16lc0ag_di" bpmnElement="Association_16lc0ag">
+        <di:waypoint x="571" y="500" />
+        <di:waypoint x="465" y="610" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_1nma6xi_di" bpmnElement="Association_1nma6xi">
+        <di:waypoint x="780" y="420" />
+        <di:waypoint x="780" y="330" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Association_0f4kd2c_di" bpmnElement="Association_0f4kd2c">
+        <di:waypoint x="930" y="500" />
+        <di:waypoint x="930" y="630" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="TextAnnotation_05udqom_di" bpmnElement="TextAnnotation_05udqom">
+        <dc:Bounds x="730" y="80" width="369.9912891986063" height="250" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="TextAnnotation_08ox2ye_di" bpmnElement="TextAnnotation_08ox2ye">
+        <dc:Bounds x="400" y="610" width="419.99673344947735" height="339.9934668989547" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_0kjxopr_di" bpmnElement="Flow_0kjxopr">
+        <di:waypoint x="198" y="458" />
+        <di:waypoint x="245" y="458" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0m9haim_di" bpmnElement="Flow_0m9haim">
+        <di:waypoint x="270" y="483" />
+        <di:waypoint x="270" y="520" />
+        <di:waypoint x="330" y="520" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0slavus_di" bpmnElement="Flow_0slavus">
+        <di:waypoint x="270" y="433" />
+        <di:waypoint x="270" y="400" />
+        <di:waypoint x="330" y="400" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0g80l8h_di" bpmnElement="Flow_0g80l8h">
+        <di:waypoint x="430" y="400" />
+        <di:waypoint x="480" y="400" />
+        <di:waypoint x="480" y="435" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_ExtractResume_To_Normalize" bpmnElement="Flow_ExtractResume_To_Normalize">
+        <di:waypoint x="430" y="520" />
+        <di:waypoint x="480" y="520" />
+        <di:waypoint x="480" y="485" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0yg4mso_di" bpmnElement="Flow_0yg4mso">
+        <di:waypoint x="505" y="460" />
+        <di:waypoint x="560" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Normalize_To_Match" bpmnElement="Flow_Normalize_To_Match">
+        <di:waypoint x="660" y="460" />
+        <di:waypoint x="730" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Match_To_Aggregate" bpmnElement="Flow_Match_To_Aggregate">
+        <di:waypoint x="830" y="460" />
+        <di:waypoint x="880" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_07sxaji_di" bpmnElement="Flow_07sxaji">
+        <di:waypoint x="980" y="460" />
+        <di:waypoint x="1050" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Clear_To_LoadDim" bpmnElement="Flow_Clear_To_LoadDim">
+        <di:waypoint x="1150" y="460" />
+        <di:waypoint x="1220" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_LoadDim_To_LoadPerson" bpmnElement="Flow_LoadDim_To_LoadPerson">
+        <di:waypoint x="1320" y="460" />
+        <di:waypoint x="1372" y="460" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNShape id="TextAnnotation_0jsjlwm_di" bpmnElement="TextAnnotation_0jsjlwm">
+        <dc:Bounds x="880" y="630" width="409.9974593495935" height="213.70499419279906" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>
